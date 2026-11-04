@@ -30,47 +30,71 @@ app.get('/health', (req, res) => {
 });
 
 // ================================================
-// EXOTEL PASSTHRU WEBHOOK ENDPOINT (HYBRID JSON + XML + TEXT)
+// EXOTEL CONTINUOUS CONVERSATION LOOP (CUSTOMER-ENDED CALLS ONLY)
 // ================================================
 const handleExotelPassthruWebhook = (req, res) => {
   const CallSid = req.body.CallSid || req.query.CallSid || `CALL_${Date.now()}`;
   const From = req.body.From || req.query.From || 'Unknown';
   const To = req.body.To || req.query.To || '08047290347';
+  const SpeechResult = req.body.SpeechResult || req.query.SpeechResult || req.body.Digits || '';
+  const CallStatus = req.body.CallStatus || req.query.CallStatus || 'in-progress';
 
-  console.log(`[EXOTEL PASSTHRU INBOUND] CallSid: ${CallSid} | From: ${From} | To: ${To}`);
+  console.log(`[EXOTEL CONVERSATION STREAM] CallSid: ${CallSid} | From: ${From} | Speech: "${SpeechResult}" | Status: ${CallStatus}`);
 
-  // Broadcast Call Event to App & Connected WebSockets
+  // Broadcast Customer Speech to App & Connected WebSockets
   wss.clients.forEach(client => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(JSON.stringify({
-        type: 'INBOUND_EXOTEL_CALL',
+        type: 'INBOUND_CUSTOMER_SPEECH',
         callSid: CallSid,
         fromNumber: From,
-        toNumber: To,
+        customerSpeechText: SpeechResult,
         timestamp: new Date().toISOString()
       }));
     }
   });
 
-  // Check request query / accept header for Exotel format
-  if (req.query.format === 'xml' || (req.headers.accept && req.headers.accept.includes('xml'))) {
-    res.set('Content-Type', 'text/xml');
-    res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+  const lowerSpeech = SpeechResult.toLowerCase();
+  const isEndingIntent = lowerSpeech.includes("bye") ||
+                         lowerSpeech.includes("dhanyawad") ||
+                         lowerSpeech.includes("thank you") ||
+                         lowerSpeech.includes("alvida") ||
+                         lowerSpeech.includes("call rakh") ||
+                         lowerSpeech.includes("rakhuchhi");
+
+  let xmlResponse = "";
+
+  if (isEndingIntent) {
+    // End call politely ONLY when customer indicates goodbye
+    xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="female" language="hi-IN">Namaste! VoxAI Assistant is connected to your call. Please state your business query.</Say>
-</Response>`);
-  } else if (req.query.format === 'text') {
-    res.set('Content-Type', 'text/plain');
-    res.status(200).send('Namaste! VoxAI Assistant is connected to your call.');
+    <Say voice="female" language="hi-IN">Shukriya! VoxAI Assistant se baat karne ke liye dhanyawad. Have a nice day!</Say>
+    <Hangup />
+</Response>`;
   } else {
-    // Default Exotel Passthru JSON Format
-    res.status(200).json({
-      select: 'passthru',
-      call_sid: CallSid,
-      status: 'connected',
-      prompt: 'Namaste! VoxAI Assistant is connected to your call. Please state your query.'
-    });
+    // Generate AI Response
+    let aiReplyText = "Namaste! Main VoxAI Assistant bol raha hoon. Main aapki kya sahayata kar sakta hoon?";
+    if (SpeechResult && SpeechResult.length > 0) {
+      if (lowerSpeech.includes("time") || lowerSpeech.includes("hour") || lowerSpeech.includes("kholiba")) {
+        aiReplyText = "Hamara business subah 9 baje se sham 7 baje tak khulta hai. Aur kuchh jaankari chahiye?";
+      } else if (lowerSpeech.includes("price") || lowerSpeech.includes("rate") || lowerSpeech.includes("cost")) {
+        aiReplyText = "Hamare services ki pricing 999 rupees per month se shuru hoti hai.";
+      } else {
+        aiReplyText = `Ji dhanyawad. Maine aapka message "${SpeechResult}" note kar liya hai. Kya aap koi appointment ya callback book karna chahenge?`;
+      }
+    }
+
+    // Keep call open in continuous Gather loop until customer hangs up
+    xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Gather input="speech" action="https://voxai-backend-1.onrender.com/api/telephony/exotel/webhook" language="hi-IN" timeout="8">
+        <Say voice="female" language="hi-IN">${aiReplyText}</Say>
+    </Gather>
+</Response>`;
   }
+
+  res.set('Content-Type', 'text/xml');
+  res.status(200).send(xmlResponse);
 };
 
 app.get('/api/telephony/exotel/webhook', handleExotelPassthruWebhook);
