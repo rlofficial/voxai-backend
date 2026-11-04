@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const WebSocket = require('ws');
 const cors = require('cors');
 require('dotenv').config();
@@ -18,6 +19,66 @@ app.use((req, res, next) => {
   next();
 });
 
+// Helper Function: Call Gemini API for Real-time AI Voice Reply
+async function generateGeminiAiReply(customerText, language = "Hindi") {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.includes("YOUR_")) {
+    return "Ji dhanyawad, main aapki kya sahayata kar sakta hoon?";
+  }
+
+  const prompt = `You are VoxAI, a polite AI Voice Receptionist for VoxAI Enterprise Services.
+Our Business Hours: 09:00 AM to 07:00 PM (Monday-Saturday).
+Our Office Address: Plot 42, Silicon Tower, Infocity, Bhubaneswar.
+Services: AI Call Screening, Voice Support, Appointment Booking. Pricing: ₹999/mo.
+Customer said: "${customerText}".
+Reply politely in 1-2 short spoken sentences in ${language}. Do not use markdown or bullet points.`;
+
+  return new Promise((resolve) => {
+    try {
+      const data = JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      });
+
+      const options = {
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let responseBody = '';
+        res.on('data', (chunk) => { responseBody += chunk; });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(responseBody);
+            const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text && text.trim().length > 0) {
+              resolve(text.trim().replace(/[*#_]/g, ''));
+            } else {
+              resolve("Ji dhanyawad. Maine aapka message note kar liya hai. Aur koi jankari chahiye?");
+            }
+          } catch (e) {
+            resolve("Ji dhanyawad. Aapki baat samajh gayi hoon. Main aapki kya sahayata kar sakti hoon?");
+          }
+        });
+      });
+
+      req.on('error', () => {
+        resolve("Ji dhanyawad. VoxAI Assistant aapki sahayata ke liye taiyar hai.");
+      });
+
+      req.write(data);
+      req.end();
+    } catch (err) {
+      resolve("Ji dhanyawad. Aapka sandesh prapt hua.");
+    }
+  });
+}
+
 // ================================================
 // HEALTH & ROOT ENDPOINTS
 // ================================================
@@ -30,16 +91,16 @@ app.get('/health', (req, res) => {
 });
 
 // ================================================
-// EXOTEL CONTINUOUS CONVERSATION LOOP (CUSTOMER-ENDED CALLS ONLY)
+// EXOTEL CONTINUOUS CONVERSATION LOOP WITH REAL GEMINI AI
 // ================================================
-const handleExotelPassthruWebhook = (req, res) => {
+const handleExotelPassthruWebhook = async (req, res) => {
   const CallSid = req.body.CallSid || req.query.CallSid || `CALL_${Date.now()}`;
   const From = req.body.From || req.query.From || 'Unknown';
   const To = req.body.To || req.query.To || '08047290347';
-  const SpeechResult = req.body.SpeechResult || req.query.SpeechResult || req.body.Digits || '';
+  const SpeechResult = req.body.SpeechResult || req.query.SpeechResult || req.body.speech_result || req.body.Digits || '';
   const CallStatus = req.body.CallStatus || req.query.CallStatus || 'in-progress';
 
-  console.log(`[EXOTEL CONVERSATION STREAM] CallSid: ${CallSid} | From: ${From} | Speech: "${SpeechResult}" | Status: ${CallStatus}`);
+  console.log(`[EXOTEL CALL STREAM] CallSid: ${CallSid} | From: ${From} | Customer Speech: "${SpeechResult}"`);
 
   // Broadcast Customer Speech to App & Connected WebSockets
   wss.clients.forEach(client => {
@@ -65,29 +126,25 @@ const handleExotelPassthruWebhook = (req, res) => {
   let xmlResponse = "";
 
   if (isEndingIntent) {
-    // End call politely ONLY when customer indicates goodbye
+    // End call politely ONLY when customer explicitly says goodbye
     xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="female" language="hi-IN">Shukriya! VoxAI Assistant se baat karne ke liye dhanyawad. Have a nice day!</Say>
     <Hangup />
 </Response>`;
   } else {
-    // Generate AI Response
+    // Generate Real Gemini AI Spoken Response
     let aiReplyText = "Namaste! Main VoxAI Assistant bol raha hoon. Main aapki kya sahayata kar sakta hoon?";
-    if (SpeechResult && SpeechResult.length > 0) {
-      if (lowerSpeech.includes("time") || lowerSpeech.includes("hour") || lowerSpeech.includes("kholiba")) {
-        aiReplyText = "Hamara business subah 9 baje se sham 7 baje tak khulta hai. Aur kuchh jaankari chahiye?";
-      } else if (lowerSpeech.includes("price") || lowerSpeech.includes("rate") || lowerSpeech.includes("cost")) {
-        aiReplyText = "Hamare services ki pricing 999 rupees per month se shuru hoti hai.";
-      } else {
-        aiReplyText = `Ji dhanyawad. Maine aapka message "${SpeechResult}" note kar liya hai. Kya aap koi appointment ya callback book karna chahenge?`;
-      }
+    if (SpeechResult && SpeechResult.trim().length > 0) {
+      aiReplyText = await generateGeminiAiReply(SpeechResult, "Hindi");
     }
 
-    // Keep call open in continuous Gather loop until customer hangs up
+    console.log(`[AI SPOKEN REPLY]: "${aiReplyText}"`);
+
+    // Keep call open in continuous Gather loop (timeout=10 seconds for customer response time)
     xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather input="speech" action="https://voxai-backend-1.onrender.com/api/telephony/exotel/webhook" language="hi-IN" timeout="8">
+    <Gather input="speech" action="https://voxai-backend-1.onrender.com/api/telephony/exotel/webhook" language="hi-IN" timeout="10">
         <Say voice="female" language="hi-IN">${aiReplyText}</Say>
     </Gather>
 </Response>`;
