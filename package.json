@@ -1,0 +1,17 @@
+{
+  "name": "voxai-backend-server",
+  "version": "1.0.0",
+  "description": "VoxAI - Backend Server for Cloud Telephony Webhooks, WebRTC Signaling, AI Voice Engine, and Live Owner Control",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "ws": "^8.17.0",
+    "twilio": "^5.0.4"
+  }
+}
