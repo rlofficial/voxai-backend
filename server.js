@@ -30,7 +30,7 @@ app.get('/health', (req, res) => {
 });
 
 // ================================================
-// EXOTEL PASSTHRU WEBHOOK ENDPOINT (ALWAYS RETURN VALID XML)
+// EXOTEL PASSTHRU WEBHOOK ENDPOINT (HYBRID JSON + XML + TEXT)
 // ================================================
 const handleExotelPassthruWebhook = (req, res) => {
   const CallSid = req.body.CallSid || req.query.CallSid || `CALL_${Date.now()}`;
@@ -52,14 +52,25 @@ const handleExotelPassthruWebhook = (req, res) => {
     }
   });
 
-  // Return Strict Exotel / TwiML Compliant XML Response (Prevents Exotel Call Disconnect)
-  const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
+  // Check request query / accept header for Exotel format
+  if (req.query.format === 'xml' || (req.headers.accept && req.headers.accept.includes('xml'))) {
+    res.set('Content-Type', 'text/xml');
+    res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="female" language="hi-IN">Namaste! VoxAI Assistant is connected to your call. Please state your business query.</Say>
-</Response>`;
-
-  res.set('Content-Type', 'text/xml');
-  res.status(200).send(xmlResponse);
+</Response>`);
+  } else if (req.query.format === 'text') {
+    res.set('Content-Type', 'text/plain');
+    res.status(200).send('Namaste! VoxAI Assistant is connected to your call.');
+  } else {
+    // Default Exotel Passthru JSON Format
+    res.status(200).json({
+      select: 'passthru',
+      call_sid: CallSid,
+      status: 'connected',
+      prompt: 'Namaste! VoxAI Assistant is connected to your call. Please state your query.'
+    });
+  }
 };
 
 app.get('/api/telephony/exotel/webhook', handleExotelPassthruWebhook);
