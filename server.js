@@ -19,19 +19,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper Function: Call Gemini API for Real-time AI Voice Reply
-async function generateGeminiAiReply(customerText, language = "Hindi") {
+// Dynamic Executive Assistant Persona Prompt Engine (Dynamic Owner Name)
+async function generateGeminiExecutiveAssistantReply(customerText, ownerName = "the owner", language = "Hindi") {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey.includes("YOUR_")) {
-    return "Ji dhanyawad, main aapki kya sahayata kar sakta hoon?";
+    return `Namaste! Main ${ownerName} ka Personal AI Assistant bol raha hoon. Aap mujhe bataiye kya message hai, main ${ownerName} ko bata dunga.`;
   }
 
-  const prompt = `You are VoxAI, a polite AI Voice Receptionist for VoxAI Enterprise Services.
-Our Business Hours: 09:00 AM to 07:00 PM (Monday-Saturday).
-Our Office Address: Plot 42, Silicon Tower, Infocity, Bhubaneswar.
-Services: AI Call Screening, Voice Support, Appointment Booking. Pricing: ₹999/mo.
+  const prompt = `You are VoxAI, a highly professional real human-like Personal Executive Assistant working for ${ownerName}.
+Your job is to talk like a real human secretary/assistant for ${ownerName}:
+- Greet politely and ask: "Aap bataiye kya message hai, main ${ownerName} ko bata dunga."
+- If customer asks to speak to ${ownerName} directly ("${ownerName} se baat karao", "owner hain kya", "call transfer karo"):
+  Say: "${ownerName} abhi important meeting mein busy hain. Aap mujhe apna message aur detail bata dijiye, main ${ownerName} ko note karwa dunga."
+- If customer gives a message or asks any question: Answer accurately and politely in 1-2 spoken sentences.
 Customer said: "${customerText}".
-Reply politely in 1-2 short spoken sentences in ${language}. Do not use markdown or bullet points.`;
+Reply in ${language} naturally as a real human secretary for ${ownerName}. Do NOT use markdown, emojis, or asterisks.`;
 
   return new Promise((resolve) => {
     try {
@@ -57,24 +59,24 @@ Reply politely in 1-2 short spoken sentences in ${language}. Do not use markdown
             const parsed = JSON.parse(responseBody);
             const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text && text.trim().length > 0) {
-              resolve(text.trim().replace(/[*#_]/g, ''));
+              resolve(text.trim().replace(/[*#_`]/g, ''));
             } else {
-              resolve("Ji dhanyawad. Maine aapka message note kar liya hai. Aur koi jankari chahiye?");
+              resolve(`Ji, ${ownerName} abhi busy hain. Aap mujhe apna message bata dijiye, main ${ownerName} ko inform kar dunga.`);
             }
           } catch (e) {
-            resolve("Ji dhanyawad. Aapki baat samajh gayi hoon. Main aapki kya sahayata kar sakti hoon?");
+            resolve(`${ownerName} abhi busy hain. Aap mujhe bataiye kya message hai, main ${ownerName} ko bata dunga.`);
           }
         });
       });
 
       req.on('error', () => {
-        resolve("Ji dhanyawad. VoxAI Assistant aapki sahayata ke liye taiyar hai.");
+        resolve(`Namaste! Main ${ownerName} ka assistant bol raha hoon. Aap apna message bata dijiye.`);
       });
 
       req.write(data);
       req.end();
     } catch (err) {
-      resolve("Ji dhanyawad. Aapka sandesh prapt hua.");
+      resolve(`Namaste! Main ${ownerName} ka assistant bol raha hoon. Kripya apna message bataiye.`);
     }
   });
 }
@@ -87,35 +89,23 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'HEALTHY', service: 'VoxAI Telephony Backend', timestamp: new Date().toISOString() });
+  res.json({ status: 'HEALTHY', service: 'VoxAI Personal Assistant Telephony Backend', timestamp: new Date().toISOString() });
 });
 
 // ================================================
-// EXOTEL CONTINUOUS CONVERSATION LOOP WITH REAL GEMINI AI
+// EXOTEL DYNAMIC EXECUTIVE ASSISTANT STREAMING WEBHOOK
 // ================================================
 const handleExotelPassthruWebhook = async (req, res) => {
   const CallSid = req.body.CallSid || req.query.CallSid || `CALL_${Date.now()}`;
   const From = req.body.From || req.query.From || 'Unknown';
   const To = req.body.To || req.query.To || '08047290347';
   const SpeechResult = req.body.SpeechResult || req.query.SpeechResult || req.body.speech_result || req.body.Digits || '';
-  const CallStatus = req.body.CallStatus || req.query.CallStatus || 'in-progress';
+  const ownerName = req.body.ownerName || req.query.ownerName || process.env.OWNER_NAME || "the owner";
 
-  console.log(`[EXOTEL CALL STREAM] CallSid: ${CallSid} | From: ${From} | Customer Speech: "${SpeechResult}"`);
-
-  // Broadcast Customer Speech to App & Connected WebSockets
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({
-        type: 'INBOUND_CUSTOMER_SPEECH',
-        callSid: CallSid,
-        fromNumber: From,
-        customerSpeechText: SpeechResult,
-        timestamp: new Date().toISOString()
-      }));
-    }
-  });
+  console.log(`[EXOTEL DYNAMIC ASSISTANT STREAM] CallSid: ${CallSid} | From: ${From} | Owner: "${ownerName}" | Speech: "${SpeechResult}"`);
 
   const lowerSpeech = SpeechResult.toLowerCase();
+  const isAskingForOwner = lowerSpeech.includes(ownerName.toLowerCase()) || lowerSpeech.includes("baat karao") || lowerSpeech.includes("owner") || lowerSpeech.includes("transfer");
   const isEndingIntent = lowerSpeech.includes("bye") ||
                          lowerSpeech.includes("dhanyawad") ||
                          lowerSpeech.includes("thank you") ||
@@ -123,25 +113,64 @@ const handleExotelPassthruWebhook = async (req, res) => {
                          lowerSpeech.includes("call rakh") ||
                          lowerSpeech.includes("rakhuchhi");
 
+  // Broadcast Live Turn to App Chat Box
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({
+        type: 'LIVE_CALL_CHAT_TURN',
+        callSid: CallSid,
+        fromNumber: From,
+        customerSpeechText: SpeechResult,
+        isAskingForHumanTakeover: isAskingForOwner,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  });
+
   let xmlResponse = "";
 
   if (isEndingIntent) {
-    // End call politely ONLY when customer explicitly says goodbye
+    const goodbyeText = `Shukriya! Main ${ownerName} ko aapka message de dunga. Have a nice day!`;
+
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'AI_SPOKEN_REPLY',
+          callSid: CallSid,
+          fromNumber: From,
+          aiReplyText: goodbyeText,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    });
+
     xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="female" language="hi-IN">Shukriya! VoxAI Assistant se baat karne ke liye dhanyawad. Have a nice day!</Say>
+    <Say voice="female" language="hi-IN">${goodbyeText}</Say>
     <Hangup />
 </Response>`;
   } else {
-    // Generate Real Gemini AI Spoken Response
-    let aiReplyText = "Namaste! Main VoxAI Assistant bol raha hoon. Main aapki kya sahayata kar sakta hoon?";
+    // Generate Dynamic Executive Assistant Response
+    let aiReplyText = `Namaste! Main ${ownerName} ka Personal AI Assistant bol raha hoon. Aap mujhe bataiye kya message hai, main ${ownerName} ko bata dunga.`;
     if (SpeechResult && SpeechResult.trim().length > 0) {
-      aiReplyText = await generateGeminiAiReply(SpeechResult, "Hindi");
+      aiReplyText = await generateGeminiExecutiveAssistantReply(SpeechResult, ownerName, "Hindi");
     }
 
-    console.log(`[AI SPOKEN REPLY]: "${aiReplyText}"`);
+    console.log(`[DYNAMIC AI ASSISTANT REPLY]: "${aiReplyText}"`);
 
-    // Keep call open in continuous Gather loop (timeout=10 seconds for customer response time)
+    // Broadcast AI Reply to App Chat Box
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type: 'AI_SPOKEN_REPLY',
+          callSid: CallSid,
+          fromNumber: From,
+          aiReplyText: aiReplyText,
+          timestamp: new Date().toISOString()
+        }));
+      }
+    });
+
     xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Gather input="speech" action="https://voxai-backend-1.onrender.com/api/telephony/exotel/webhook" language="hi-IN" timeout="10">
@@ -163,7 +192,7 @@ app.post('/api/telephony/exotel/webhook', handleExotelPassthruWebhook);
 const handleTwilioWebhook = (req, res) => {
   const xmlResponse = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Aditi">Namaste! VoxAI Assistant is handling this call for the user.</Say>
+    <Say voice="Polly.Aditi">Namaste! VoxAI Assistant is handling this call.</Say>
 </Response>`;
   res.set('Content-Type', 'text/xml');
   res.status(200).send(xmlResponse);
@@ -195,7 +224,7 @@ app.post('/api/ai/process-voice-turn', (req, res) => {
   const { sessionId, customerSpeechText, language } = req.body;
   res.json({
     sessionId,
-    responseSpoken: "Namaste! VoxAI Assistant received your query.",
+    responseSpoken: "Namaste! Main AI Assistant bol raha hoon.",
     language: language || 'Hindi',
     timestamp: new Date().toISOString()
   });
